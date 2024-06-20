@@ -167,8 +167,14 @@ class SplitLookupFunction_Dense_Op
     TORCH_CHECK_EQ(grad_outputs.size(), 1);
 
 #ifdef USE_ROCM
+#include <rocprim/config.hpp>
+#if ROCPRIM_NAVI
+    constexpr int32_t BT_block_size = 32;
+    constexpr int32_t max_segment_length_per_warp = 32;
+#else
     constexpr int32_t BT_block_size = 64;
     constexpr int32_t max_segment_length_per_warp = 64;
+#endif
 #else
     constexpr int32_t BT_block_size = 32;
     constexpr int32_t max_segment_length_per_warp = 32;

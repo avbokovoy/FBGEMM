@@ -54,7 +54,12 @@ __global__ __launch_bounds__(kMaxThreads) void lfu_cache_find_uncached_kernel(
     const bool found = ::__ldg((&lxu_cache_state[cache_set][0]) + slot) == idx;
 
 #ifdef USE_ROCM
+#include <rocprim/config.hpp>
+#if ROCPRIM_NAVI
+    if (!__any_sync(0xFFFFFFFF, found)) {
+#else
     if (!__any_sync(0xFFFFFFFFFFFFFFFF, found)) {
+#endif
 #else
     if (!__any_sync(0xFFFFFFFF, found)) {
 #endif

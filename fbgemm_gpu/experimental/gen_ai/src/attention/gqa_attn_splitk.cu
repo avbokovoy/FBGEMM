@@ -30,8 +30,14 @@
 #endif
 
 #ifdef USE_ROCM
+#include <rocprim/config.hpp>
+#if ROCPRIM_NAVI
+constexpr int32_t kThreadsPerWarp = 32;
+constexpr int32_t kWarpsPerBlock = 32;
+#else
 constexpr int32_t kThreadsPerWarp = 64;
 constexpr int32_t kWarpsPerBlock = 16;
+#endif
 #else
 constexpr int32_t kThreadsPerWarp = 32;
 constexpr int32_t kWarpsPerBlock = 32;

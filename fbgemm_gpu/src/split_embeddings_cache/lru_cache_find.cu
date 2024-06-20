@@ -131,7 +131,12 @@ __global__ __launch_bounds__(kMaxThreads) void lru_cache_find_uncached_kernel(
     }
 
 #ifdef USE_ROCM
+#include <rocprim/config.hpp>
+#if ROCPRIM_NAVI
+    if (!__any_sync(0xFFFFFFFF, found)) {
+#else
     if (!__any_sync(0xFFFFFFFFFFFFFFFF, found)) {
+#endif
 #else
     if (!__any_sync(0xFFFFFFFF, found)) {
 #endif

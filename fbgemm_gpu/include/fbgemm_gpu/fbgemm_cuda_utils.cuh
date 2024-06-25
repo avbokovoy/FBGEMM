@@ -69,8 +69,8 @@ namespace cub = hipcub;
 
 // Warp size
 #ifdef USE_ROCM
-#include <rocprim/config.hpp>
-#if ROCPRIM_NAVI
+#include "fbgemm_gpu/amd_device_arch.h"
+#if defined(AMD_ARCH_NAVI)
 static constexpr int32_t kWarpSize = 32;
 #else
 static constexpr int32_t kWarpSize = 64;
@@ -802,8 +802,8 @@ template <typename K, typename V, bool Dir, typename Comp>
 struct BitonicSort {
   static inline __device__ void sort(K k[1], V v[1]) {
 #ifdef USE_ROCM
-#include <rocprim/config.hpp>
-#if ROCPRIM_NAVI
+#include "fbgemm_gpu/amd_device_arch.h"
+#if defined(AMD_ARCH_NAVI)
     static_assert(fbgemm_gpu::kWarpSize == 32, "unexpected warp size");
 #else
     static_assert(fbgemm_gpu::kWarpSize == 64, "unexpected warp size");

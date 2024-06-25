@@ -64,8 +64,8 @@ __launch_bounds__(kMaxThreads) void direct_mapped_lru_cache_find_uncached_kernel
     } else {
       // There is no atomicMax for int64_t...
 #ifdef USE_ROCM
-#include <rocprim/config.hpp>
-#if ROCPRIM_NAVI
+#include "fbgemm_gpu/amd_device_arch.h"
+#if defined(AMD_ARCH_NAVI)
       auto addr = reinterpret_cast<long long int*>(
           &lxu_cache_miss_timestamp[cache_set][0]);
       auto val = static_cast<long long int>(time_stamp + 1);

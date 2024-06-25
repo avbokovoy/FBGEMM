@@ -147,19 +147,33 @@ set(WEIGHT_OPTIONS
 # TBE Code Generation
 ################################################################################
 
+list(APPEND AMD_NAVI_ARCH_LIST "gfx1010" "gfx1011" "gfx1012" "gfx1030" 
+                               "gfx1031" "gfx1032" "gfx1100" "gfx1101" "gfx1102")
+
+macro(GET_AMD_WAVESIZE AMD_WAVESIZE)
+  if(PYTORCH_ROCM_ARCH IN_LIST AMD_NAVI_ARCH_LIST)
+    set(${AMD_WAVESIZE} 32)
+  else()
+    set(${AMD_WAVESIZE} 64)
+  endif()
+endmacro()
+
 macro(RUN_GEN_SCRIPT SCRIPT)
   set(rocm_flag "")
+  set(rocm_wavesize "")
   if(USE_ROCM)
     set(rocm_flag --is_rocm)
+    GET_AMD_WAVESIZE(AMD_WAVESIZE)
+    set(rocm_wavesize --rocm_wavesize=${AMD_WAVESIZE})
   endif()
 
   BLOCK_PRINT(
     "Running code generation script ..."
-    "${PYTHON_EXECUTABLE} ${SCRIPT} --opensource ${rocm_flag}"
+    "${PYTHON_EXECUTABLE} ${SCRIPT} --opensource ${rocm_flag} ${rocm_wavesize}"
   )
 
   execute_process(
-    COMMAND "${PYTHON_EXECUTABLE}" ${SCRIPT} "--opensource" ${rocm_flag})
+    COMMAND "${PYTHON_EXECUTABLE}" ${SCRIPT} "--opensource" ${rocm_flag} ${rocm_wavesize})
 endmacro()
 
 foreach(script

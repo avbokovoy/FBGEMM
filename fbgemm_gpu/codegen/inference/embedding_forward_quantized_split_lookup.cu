@@ -53,12 +53,12 @@ __launch_bounds__(kMaxThreads) void int_nbit_split_embedding_codegen_forward_pru
 
   const uint32_t subwarp_id = threadIdx.x / 4;
   const uint32_t subwarp_tid = threadIdx.x % 4;
-#ifdef USEROCM
+#ifdef USE_ROCM
 #include "fbgemm_gpu/amd_device_arch.h"
 #if defined(AMD_ARCH_NAVI)
   using mask_t = uint32_t;
 #else
-  using mask_t = uint64_t
+  using mask_t = uint64_t;
 #endif
 #else
   using mask_t = uint32_t;

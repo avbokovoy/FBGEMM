@@ -7,8 +7,7 @@
  */
 #pragma once
 
-#if defined(__gfx1010__) || defined(__gfx1011__) || defined(__gfx1012__) ||    \
-    defined(__gfx1030__) || defined(__gfx1031__) || defined(__gfx1032__) ||    \
-    defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__)
+#if __gfx1010__ || __gfx1011__ || __gfx1012__ || __gfx1030__ || __gfx1031__ || \
+    __gfx1032__ || __gfx1100__ || __gfx1101__ || __gfx1102__
 #define AMD_ARCH_NAVI
 #endif

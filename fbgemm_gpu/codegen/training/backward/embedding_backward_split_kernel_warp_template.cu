@@ -523,15 +523,8 @@ hip_split_embedding{{ ndesc }}_backward_codegen_{{ optimizer }}_{{ wdesc }}{{ vd
     const int32_t batch, // PR23 extra
     const int32_t num_rows, // PR23 extra
     const int32_t num_tables, // PR23 extra (Not needed)
-    // {%- if is_index_select %}
-    // const at::PackedTensorAccessor32<int64_t, 1, at::RestrictPtrTraits> grad_offsets,
-    // const bool permute_output_dim_0_1
-    // {%- else %}
     {{optimizer}}_kernel_arg_t opt_karg
-    // {%- endif %}
 ) {
-    // WIP: test the build system
-#if 1
     {%- if not nobag %}
     int32_t T = D_offsets.size(0) - 1;
     {%- else %}
@@ -570,8 +563,6 @@ hip_split_embedding{{ ndesc }}_backward_codegen_{{ optimizer }}_{{ wdesc }}{{ vd
                p_sorted_linear_indices_run,
                p_sorted_linear_indices_cumulative_run_lengths,
                p_sorted_linear_indices_num_runs,
-               // p_long_run_ids,  // unused
-               // p_num_long_run_ids,  // unused
                {%- if not nobag %}
                info_B_num_bits,
                info_B_mask,
@@ -584,7 +575,6 @@ hip_split_embedding{{ ndesc }}_backward_codegen_{{ optimizer }}_{{ wdesc }}{{ vd
                num_rows,
                T,
                opt_karg);
-#endif
 }
 
 {%- macro hip_template_instantiation(
@@ -662,12 +652,7 @@ hip_split_embedding{{ ndesc }}_backward_codegen_{{ optimizer }}_{{ wdesc }}{{ vd
     const int32_t batch, // PR23 extra
     const int32_t num_rows, // PR23 extra
     const int32_t num_tables, // PR23 extra
-    // {%- if is_index_select %}
-    // const at::PackedTensorAccessor32<int64_t, 1, at::RestrictPtrTraits> grad_offsets,
-    // const bool permute_output_dim_0_1
-    // {%- else %}
     {{optimizer}}_kernel_arg_t opt_karg
-    // {%- endif %}
 );
 {%- endmacro %}
 

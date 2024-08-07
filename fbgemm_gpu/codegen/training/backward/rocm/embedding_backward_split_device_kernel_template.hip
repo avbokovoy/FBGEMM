@@ -23,7 +23,7 @@
 
 #include <hip/hip_runtime.h>
 #include <hip/hip_fp16.h>
-#include "split_tbe_common_hip.h"
+#include "fbgemm_gpu/hip_kernel_inc/split_embeddings_common.h"
 
 template <typename cache_t, typename emb_t, int32_t embedding_dim, int32_t weight_decay_mode>
 struct rowwise_adagrad_optimizer_t
@@ -119,7 +119,7 @@ template <typename optimizer_t,
           int32_t segment_unroll, // 8
           int32_t segment_split,  // 0-warp per row, 1-cta per row, 2-atomic(needed?)
           bool    weighted>
-__device__ void split_tbe_backward_hip_kernel(
+__device__ void split_tbe_backward_hip_kernel_{{ kdesc }}(
     const grad_t* p_output_grad,
     emb_t* p_emb_table,
     const int64_t* p_hash_size_cumsum,
@@ -128,7 +128,15 @@ __device__ void split_tbe_backward_hip_kernel(
     const int32_t* p_sorted_linear_indices_num_runs,
     // const int32_t* p_long_run_ids,  // unused
     // const int32_t* p_num_long_run_ids, // unused
-    const int32_t* p_sorted_infos,
+    {%- if not nobag %}
+    const int32_t info_B_num_bits,
+    const uint32_t info_B_mask,
+    {%- endif %}
+    {%- if not nobag %}
+    const int32_t* p_sorted_infos,  // FIXME: this is for not nobag, TODO support nobag (avbokovoy: WIP)
+    {%- else %}
+    const int64_t* p_sorted_infos,
+    {%- endif %}
     magic_div_u32_t batch_mdiv,
     uint32_t max_segment_length_per_warp,
     uint32_t emb_dim,
@@ -156,8 +164,16 @@ __device__ void split_tbe_backward_hip_kernel(
     const int32_t segment_start = p_sorted_linear_indices_cumulative_run_lengths[run_id];
     const int32_t segment_end   = p_sorted_linear_indices_cumulative_run_lengths[run_id + 1];
 
-    int32_t info_0 = p_sorted_infos[segment_start];
-    uint32_t t_0 = magic_div_u32_run(batch_mdiv, info_0);
+    // PR23 FIXME: support nobag
+    // avbokovoy: WIP
+    {%- if nobag %}
+    const auto info_0 = p_sorted_infos[segment_start];
+    int32_t t_0 = info_0 % num_tables;
+    //magic_div_u32_run(batch_mdiv, info_0);
+    {%- else %}
+    const auto info_0 = reinterpret_cast<const uint32_t*>(&p_sorted_infos[0])[segment_start];
+    const auto t_0 = info_0 >> info_B_num_bits;
+    {%- endif %}
     int64_t hash_size = p_hash_size_cumsum[t_0];
 
     const int64_t emb_idx       = linear_index - hash_size;
@@ -399,6 +415,8 @@ L_tail_grad_acc:
 // PR23: for the reference, the template is
 // hip_split_embedding{{ ndesc }}_backward_codegen_{{ optimizer }}_{{ wdesc }}{{ vdesc }}_kernel_warp_per_row_1(
 
+#if 0
+
 template <
     typename emb_t,
     typename grad_t,
@@ -475,7 +493,7 @@ split_embedding{{ ndesc }}_backward_codegen_{{ optimizer }}_{{ wdesc }}{{ vdesc 
     // {%- endif %}
 ) {
     // WIP: test the build system
-#if 0
+
     auto p_output_grad = grad_output.data();
     auto p_emb_table = dev_weights.data();
     auto p_hash_size_cumsum = hash_size_cumsum.data();
@@ -516,8 +534,8 @@ split_embedding{{ ndesc }}_backward_codegen_{{ optimizer }}_{{ wdesc }}{{ vdesc 
                num_rows,
                num_tables,
                opt_karg);
-#endif
 }
+#endif
 
 #if 0  // Upstream moved to a differnet approach
 #define __SPLIT_TBE_BWD_KERNEL(optimizer,                                                                                            \

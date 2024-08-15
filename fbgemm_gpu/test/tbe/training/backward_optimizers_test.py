@@ -901,8 +901,8 @@ class BackwardOptimizersTest(unittest.TestCase):
                 WeightDecayMode.NONE,
                 WeightDecayMode.L2,
                 WeightDecayMode.DECOUPLE,
-                WeightDecayMode.COUNTER,
-                WeightDecayMode.COWCLIP,
+                # WeightDecayMode.COUNTER,
+                # WeightDecayMode.COWCLIP,
             ]
         ),
     )

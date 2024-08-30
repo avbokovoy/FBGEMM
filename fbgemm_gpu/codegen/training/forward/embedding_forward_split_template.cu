@@ -743,7 +743,7 @@ batch_index_select_dim0_codegen_forward_cuda(
 
             if (guard_ex)  guard_ex = all_devs && no_dupt;
 
-            if (guard_ex && (dev_weights.scalar_type() == at::ScalarType::Half || dev_weights.scalar_type() == at::ScalarType::Float)) {
+            // if (guard_ex && (dev_weights.scalar_type() == at::ScalarType::Half || dev_weights.scalar_type() == at::ScalarType::Float)) {
                 constexpr uint32_t workgroup_size = 256;
                 constexpr uint32_t wave_size = 64;
 
@@ -847,7 +847,7 @@ batch_index_select_dim0_codegen_forward_cuda(
                     return;
                     
                     
-                }
+                // }
             // }
             {%-else %}
             constexpr auto kMaxVecsPerThread = kFixedMaxVecsPerThread;

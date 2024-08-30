@@ -213,5 +213,6 @@ L_end:
     }
 
     // store out
-    store_row_per_warp<emb_t, embedding_dim, output_t>::run(&accumulator[0], p_output, lane_id);
+    // store_row_per_warp<emb_t, embedding_dim, output_t>::run(&accumulator[0], p_output, lane_id);
+    store_row_per_warp<output_t, embedding_dim, output_t>::run(&accumulator[0], p_output, lane_id);
 }

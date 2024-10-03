@@ -115,6 +115,8 @@ def cli() -> None:
 @click.option("--output-dtype", type=SparseType, default=SparseType.FP32)
 @click.option("--requests_data_file", type=str, default=None)
 @click.option("--tables", type=str, default=None)
+@click.option("--save", is_flag=True, default=False)
+@click.option("--test", is_flag=True, default=False)
 def device(  # noqa C901
     alpha: float,
     bag_size: int,
@@ -139,6 +141,8 @@ def device(  # noqa C901
     output_dtype: SparseType,
     requests_data_file: Optional[str],
     tables: Optional[str],
+    save: bool,
+    test: bool
 ) -> None:
     np.random.seed(42)
     torch.manual_seed(42)
@@ -170,6 +174,15 @@ def device(  # noqa C901
     else:
         Ds = [D] * T
     optimizer = OptimType.EXACT_ROWWISE_ADAGRAD if row_wise else OptimType.EXACT_ADAGRAD
+
+    file_postfix = f"{alpha}_{bag_size}_{embedding_dim}_{output_dtype}.pt" if test or save else ""
+    
+    if save:
+        os.makedirs('data', exist_ok=True)
+        torch.save(Ds, f'data/in_{file_postfix}.pt')
+
+    if test:
+        Ds=torch.load(f'data/in_{file_postfix}.pt')
 
     if managed == "device":
         managed_option = (
@@ -279,6 +292,9 @@ def device(  # noqa C901
         ),
         flush_gpu_cache_size_mb=flush_gpu_cache_size_mb,
         num_warmups=warmup_runs,
+        file_postfix=file_postfix,
+        save=save,
+        test=test
     )
     logging.info(
         f"Forward, B: {B}, "
@@ -308,6 +324,9 @@ def device(  # noqa C901
         bwd_only=True,
         grad=grad_output,
         num_warmups=warmup_runs,
+        file_postfix=file_postfix,
+        save=save,
+        test=test
     )
     logging.info(
         f"Backward, B: {B}, E: {E}, T: {T}, D: {D}, L: {L}, "

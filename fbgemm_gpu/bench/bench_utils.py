@@ -156,6 +156,9 @@ def benchmark_requests(
     nvtx_range: str = "",
     # Can be used to clear model's stats after warmup for example.
     callback_after_warmup: Optional[Callable[[], None]] = None,
+    file_postfix: str = "",
+    save: bool = False,
+    test: bool = False,
 ) -> float:
     times = []
 
@@ -197,9 +200,9 @@ def benchmark_requests(
             torch.cuda.nvtx.range_push(f"{nvtx_range}-{it}")
 
         if bwd_only:
-            out.backward(grad)
+            bwd_res = out.backward(grad)
         else:
-            func(indices, offsets, weights)
+            fwd_res = func(indices, offsets, weights)
 
         if nvtx_range:
             torch.cuda.nvtx.range_pop()
@@ -215,6 +218,20 @@ def benchmark_requests(
             times.append(it_time)
     avg_time = sum(times) / len(requests)
     median_time = statistics.median(times)
+    if save:
+        if bwd_only:
+            torch.save(bwd_res, f"data/bwd_{file_postfix}")
+        else:
+            torch.save(fwd_res, f"data/fwd_{file_postfix}")
+
+    if test:
+        if bwd_only:
+            bwd_ref=torch.load(f"data/bwd_{file_postfix}")
+            torch.testing.assert_close(bwd_res, bwd_ref)
+        else:
+            fwd_ref=torch.load(f"data/fwd_{file_postfix}")
+            torch.testing.assert_close(fwd_res, fwd_ref)
+
     return median_time if check_median else avg_time
 
 

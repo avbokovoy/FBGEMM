@@ -66,9 +66,7 @@ env.globals["max_embedding_dim"] = 2048
 env.globals["legacy_max_embedding_dim"] = 1024
 
 # An optimization for ROCm
-#env.globals["items_per_warp"] = 128 if args.is_rocm is False else 256
-env.globals["items_per_warp"] = 64 if args.is_rocm is False else 128
-
+env.globals["items_per_warp"] = 128 if args.is_rocm is False else 256
 
 # The fixed max vectors per thread for different kernels.  The numbers were
 # derived from empirical studies
@@ -155,7 +153,7 @@ def get_max_vecs_template_configs(
     Generate the template configs for each kFixedMaxVecsPerThread,
     kThreadGroupSize, and kUseVecBlocking
     """
-    warp_size = items_per_warp // 2
+    warp_size = items_per_warp // 4
     configs: List[Tuple[int, int, str]] = []
 
     if use_vec_blocking:

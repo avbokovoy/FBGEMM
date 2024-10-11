@@ -77,7 +77,11 @@ using namespace fbgemm_gpu;
     {%- endif %}
     {%- endif %}
     {#-/* Set the weights row */#}
+#if VEC_WIDTH == 4
     const auto weights_row = WeightRowAccessor
+#else
+    const auto weights_row = WeightRowAccessor2
+#endif
         <
             emb_t,
             cache_t,

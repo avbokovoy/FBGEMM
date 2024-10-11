@@ -195,7 +195,6 @@ using namespace fbgemm_gpu;
         // Cooperatively load the positional weight indices
         at::acc_type<cache_t, true> idx_weight = l < L ? indice_weights[indices_start + l] : 0;
         {%- endif %}
-
         // Iterate over kThreadGroupSize indices
         for (auto j = 0; j < kThreadGroupSize && l_start + j < L; ++j) {
             {%- if dense or lxu_miss_rate != "cache_conflict_miss_rate::zero" %}
@@ -457,7 +456,11 @@ batch_index_select_dim0_codegen_forward_kernel(
     const float inv_L = (mean_pooling && L != 0) ? static_cast<float>(1.0) / L: static_cast<float>(1.0);
 
     // Set up the accumulator buffer
+#if VEC_WIDTH == 4
     Vec4T<cache_t> accumulators[kMaxVecsPerThread];
+#else
+    Vec2T<cache_t> accumulators[kMaxVecsPerThread];
+#endif
     {%- endif %}
 
     {%- if dense %}

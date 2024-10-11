@@ -145,13 +145,13 @@ struct Vec2T<float> : public Vec2BaseT<float> {
   }
 
   // this <- this + a * b
-  DEVICE_INLINE void fma_(const Vec4T<float>& a, const float b) {
+  DEVICE_INLINE void fma_(const Vec2T<float>& a, const float b) {
     acc.x = __fmaf_rn(a.acc.x, b, acc.x);
     acc.y = __fmaf_rn(a.acc.y, b, acc.y);
   }
 
   // this <- this + a
-  DEVICE_INLINE void add_(const Vec4T<float>& a) {
+  DEVICE_INLINE void add_(const Vec2T<float>& a) {
     acc.x += a.acc.x;
     acc.y += a.acc.y;
   }
@@ -163,7 +163,7 @@ struct Vec2T<float> : public Vec2BaseT<float> {
   }
 
   // this <- this element-wise mul a
-  DEVICE_INLINE void element_wise_mul_(const Vec4T<float>& a) {
+  DEVICE_INLINE void element_wise_mul_(const Vec2T<float>& a) {
     acc.x *= a.acc.x;
     acc.y *= a.acc.y;
   }
@@ -327,7 +327,7 @@ struct Vec2T<at::Half> : public Vec2BaseT<at::Half> {
 };
 
 ////////////////////////////////////////////////////////////////////////////////
-// Vec4T<at::BFloat16>
+// Vec2T<at::BFloat16>
 ////////////////////////////////////////////////////////////////////////////////
 
 template <>

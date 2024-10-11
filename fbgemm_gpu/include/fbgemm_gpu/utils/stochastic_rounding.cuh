@@ -189,7 +189,7 @@ DEVICE_INLINE void stochastic_rounding_vector(
     StochasticRoundingRNGState& state,
     const float2 /* not used */) {
   const uint4 random_bits = stochastic_rounding_rand4(&state);
-  Half4 v;
+  Half2 v;
   v.a = __halves2half2(
       stochastic_rounding_scalar(value.acc.x, random_bits.x),
       stochastic_rounding_scalar(value.acc.y, random_bits.y));

@@ -150,9 +150,11 @@ struct load_row_per_warp<half, 128, index_t>
     static __device__ void
     run(half* emb_data, index_t row_index, const half* p_emb_table, int lane_id)
     {
-        int32x4_t emb_res = amdgcn_make_buffer_resource(p_emb_table + row_index * 128);
-        *reinterpret_cast<half2*>(emb_data) =
-            llvm_amdgcn_raw_buffer_load_fp16x2(emb_res, lane_id * sizeof(half2), 0, 0);
+        const half* emb_table_offseted = p_emb_table + row_index * 128;
+        *reinterpret_cast<half2*>(emb_data) = *reinterpret_cast<const half2*>(emb_table_offseted + lane_id * (sizeof(half2) / sizeof(half)));
+        // int32x4_t emb_res = amdgcn_make_buffer_resource(p_emb_table + row_index * 128);
+        // *reinterpret_cast<half2*>(emb_data) =
+        //     llvm_amdgcn_raw_buffer_load_fp16x2(emb_res, lane_id * sizeof(half2), 0, 0);
     }
 };
 
@@ -162,18 +164,22 @@ struct load_row_per_warp<half, 160, index_t>
     static __device__ void
     run(half* emb_data, index_t row_index, const half* p_emb_table, int lane_id)
     {
-        int32x4_t emb_res = amdgcn_make_buffer_resource(p_emb_table + row_index * 192);
-        *reinterpret_cast<half2*>(emb_data) =
-            llvm_amdgcn_raw_buffer_load_fp16x2(emb_res, lane_id * sizeof(half2), 0, 0);
-        if((lane_id + 128) % 192 < 160)
-        {
-            emb_data[2] =
-                llvm_amdgcn_raw_buffer_load_fp16(emb_res, (lane_id + 128) * sizeof(half), 0, 0);
-        }
-        else
-        {
-            emb_data[2] = 0.0;
-        }
+
+        const half* emb_table_offseted = p_emb_table + row_index * 128;
+        *reinterpret_cast<half2*>(emb_data) = *reinterpret_cast<const half2*>(emb_table_offseted + lane_id * sizeof(half2));
+        // emb_data[2] = ((lane_id + 128)) % 192 < 160 ? *(emb_table_offseted + (lane_id + 128) * sizeof(half)) : half(0.0);
+        // int32x4_t emb_res = amdgcn_make_buffer_resource(p_emb_table + row_index * 192);
+        // *reinterpret_cast<half2*>(emb_data) =
+        //     llvm_amdgcn_raw_buffer_load_fp16x2(emb_res, lane_id * sizeof(half2), 0, 0);
+        // if((lane_id + 128) % 192 < 160)
+        // {
+        //     emb_data[2] =
+        //         llvm_amdgcn_raw_buffer_load_fp16(emb_res, (lane_id + 128) * sizeof(half), 0, 0);
+        // }
+        // else
+        // {
+        //     emb_data[2] = 0.0;
+        // }
     }
 };
 

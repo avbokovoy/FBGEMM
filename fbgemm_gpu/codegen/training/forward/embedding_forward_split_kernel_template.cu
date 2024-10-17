@@ -272,9 +272,17 @@ using namespace fbgemm_gpu;
         {%- endif %}
         #define VAL_BLOCK 4
         {%- if not nobag %}
+#if VEC_WIDTH_M == 4
         Vec4T<cache_t> vals[VAL_BLOCK*kMaxVecsPerThread];        
+#else
+        Vec2T<cache_t> vals[VAL_BLOCK*kMaxVecsPerThread];        
+#endif
         {%- else %}
-        Vec4T<cache_t> vals[VAL_BLOCK];
+#if VEC_WIDTH_M == 4
+        Vec4T<cache_t> vals[VAL_BLOCK];        
+#else
+        Vec2T<cache_t> vals[VAL_BLOCK];        
+#endif
         {%- endif %}
         // Iterate over kThreadGroupSize indices
         // TODO: (avbokovoy) Take into account trailing iteration

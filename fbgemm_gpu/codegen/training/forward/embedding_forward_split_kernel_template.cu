@@ -360,7 +360,7 @@ batch_index_select_dim0_codegen_forward_kernel(
 #endif
 
     // Elements are processed 4 at a time through fbgemm_gpu::Vec4 (CUDA float4, 16 bytes)
-    constexpr int VEC_WIDTH = 4;
+    constexpr int VEC_WIDTH = 2;
 
     // Determine the linearized warp ID, and exit early if needed
     int32_t b_t = blockIdx.x * blockDim.y + threadIdx.y;

@@ -652,7 +652,7 @@ batch_index_select_dim0_codegen_forward_kernel
             cache_type,
             output_type,
             use_cache,
-            kMaxVecsPerThread,
+            kMaxVecsPerThread * 2,
             kThreadGroupSize)
         }}
     {%- endfor %}

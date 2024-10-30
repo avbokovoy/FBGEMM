@@ -65,7 +65,7 @@ using namespace fbgemm_gpu;
         kThreadGroupSize
         output_j
 */#}
-{%- macro load_and_accumulate(from_cache) %}
+{%- macro load_weights(from_cache) %}
     {%- if from_cache %}
     const cache_t* cache_weights;
     {%- if ssd %}
@@ -119,14 +119,7 @@ using namespace fbgemm_gpu;
         // Load the slice of the weights
         int32_t d = (i * kThreadGroupSize + threadIdx.x) * VEC_WIDTH;
         d = (d < D) ? d : 0;
-        
-        {%- if is_gwd_kernel %}
-        auto weights_slice = weights_row.load(d, qparams);
-        // Scale weights with global weight decay
-        weights_slice.mul_(global_weight_decay_j);
-        {%- else %}
         const auto weights_slice = weights_row.load(d, qparams);
-        {%- endif %}
         vals[inner_j*kMaxVecsPerThread + i] = weights_slice;
     }
 
@@ -175,7 +168,7 @@ using namespace fbgemm_gpu;
         kThreadGroupSize
         output_j
 */#}
-{%- macro load_and_accumulate2(from_cache) %}
+{%- macro accumulate_and_store(from_cache) %}
     {%- if from_cache %}
     const cache_t* cache_weights;
     {%- if ssd %}
@@ -227,6 +220,10 @@ using namespace fbgemm_gpu;
     for (int32_t i = 0;
         i < kMaxVecsPerThread && (i * kThreadGroupSize + threadIdx.x) * VEC_WIDTH < D;
         ++i) {
+        {%- if is_gwd_kernel %}
+        // Scale weights with global weight decay
+        vals[inner_j*kMaxVecsPerThread + i].mul_(global_weight_decay_j);
+        {%- endif %}
         {%- if weighted %}
         // Accumulate the weights * positional weight
         accumulators[i].fma_(vals[inner_j*kMaxVecsPerThread + i], idx_weight_j);
@@ -235,8 +232,6 @@ using namespace fbgemm_gpu;
         accumulators[i].add_(vals[inner_j*kMaxVecsPerThread + i]);
         {%- endif %}
     }
-
-    {%- else %}
     {%- endif %}
 {%- endmacro %}
 
@@ -282,8 +277,6 @@ using namespace fbgemm_gpu;
         #define VAL_BLOCK 4
         {%- if not nobag %}
         Vec4T<cache_t> vals[VAL_BLOCK*kMaxVecsPerThread];        
-        {%- else %}
-        Vec4T<cache_t> vals[VAL_BLOCK];
         {%- endif %}
         // Iterate over kThreadGroupSize indices
         // TODO: (avbokovoy) Take into account trailing iteration
@@ -331,13 +324,9 @@ using namespace fbgemm_gpu;
             [[maybe_unused]] {{ locs_or_addrs_type }} {{ locs_or_addrs_idx }}_j
                 = use_lxu_cache ? {{ locs_or_addrs_idx }}_j_[inner_j] : 0;
 
-            // [[maybe_unused]] int32_t cache_idx_j = cache_idx_j_[inner_j];
             {%- endif %}
 	        {%- if weighted %}
             at::acc_type<cache_t, true> idx_weight_j = idx_weight_j_[inner_j];
-            {%- endif %}
-            {%- if is_gwd_kernel %}
-            const auto global_weight_decay_j = SHFL_SYNC(global_weight_decay, j);
             {%- endif %}
 
 
@@ -351,30 +340,31 @@ using namespace fbgemm_gpu;
 
             {%- if dense %}
                 {#-/* If it's dense, cache is not supported, so load from the embedding table */#}
-                {{- load_and_accumulate(false) }}
+                {{- load_weights(false) }}
 
             {%- elif lxu_miss_rate == "cache_conflict_miss_rate::all" %}
                 {#-/* Else if we know we have a 100% miss rate, then always fetch from the embedding table */#}
-                {{- load_and_accumulate(false) }}
+                {{- load_weights(false) }}
 
             {%- elif lxu_miss_rate == "cache_conflict_miss_rate::zero" %}
                 {#-/* Else if we know we have a 0% miss rate, then always fetch from the cache */#}
-                {{ load_and_accumulate(true) }}
+                {{ load_weights(true) }}
             {%- else %}
                 {#-/* Else we defer to run-time selection */#}
                 if (placement == PlacementType::MANAGED_CACHING
                     && {{ locs_or_addrs_idx }}_j != kCacheLocationMissing
                 ) {
                     {#-/* If the row is available in the cache, fetch from the cache */#}
-                    {{ load_and_accumulate(true) }}
+                    {{ load_weights(true) }}
                 } else {
                     {#-/* Else fetch from the embedding table */#}
-                    {{ load_and_accumulate(false) }}
+                    {{ load_weights(false) }}
                 }
 
             {%- endif %}
             {#/**************************************************************/#}
         }
+        {%-if not nobag %}
         // Iterate over kThreadGroupSize indices
         for (auto inner_j = 0; inner_j < VAL_BLOCK && l_offset + inner_j < L; ++inner_j) {
             auto j = outer_j + inner_j;
@@ -394,6 +384,9 @@ using namespace fbgemm_gpu;
 	        {%- if weighted %}
             at::acc_type<cache_t, true> idx_weight_j = idx_weight_j_[inner_j];
             {%- endif %}
+            {%- if is_gwd_kernel %}
+            const auto global_weight_decay_j = SHFL_SYNC(global_weight_decay, j);
+            {%- endif %}
 
             {#/**************************************************************/#}
             {#-/*
@@ -404,29 +397,30 @@ using namespace fbgemm_gpu;
 
             {%- if dense %}
                 {#-/* If it's dense, cache is not supported, so load from the embedding table */#}
-                {{- load_and_accumulate2(false) }}
+                {{- accumulate_and_store(false) }}
 
             {%- elif lxu_miss_rate == "cache_conflict_miss_rate::all" %}
                 {#-/* Else if we know we have a 100% miss rate, then always fetch from the embedding table */#}
-                {{- load_and_accumulate2(false) }}
+                {{- accumulate_and_store(false) }}
 
             {%- elif lxu_miss_rate == "cache_conflict_miss_rate::zero" %}
                 {#-/* Else if we know we have a 0% miss rate, then always fetch from the cache */#}
-                {{ load_and_accumulate2(true) }}
+                {{ accumulate_and_store(true) }}
             {%- else %}
                 {#-/* Else we defer to run-time selection */#}
                 if (placement == PlacementType::MANAGED_CACHING
                     && {{ locs_or_addrs_idx }}_j != kCacheLocationMissing) {
                     {#-/* If the row is available in the cache, fetch from the cache */#}
-                    {{ load_and_accumulate2(true) }}
+                    {{ accumulate_and_store(true) }}
                 } else {
                     {#-/* Else fetch from the embedding table */#}
-                    {{ load_and_accumulate2(false) }}
+                    {{ accumulate_and_store(false) }}
                 }
 
             {%- endif %}
             {#/**************************************************************/#}
         }
+        {%- endif %}
 	}
     }
 {%- endmacro %}

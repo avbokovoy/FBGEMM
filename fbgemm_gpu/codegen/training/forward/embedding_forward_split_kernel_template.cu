@@ -119,8 +119,14 @@ using namespace fbgemm_gpu;
         // Load the slice of the weights
         int32_t d = (i * kThreadGroupSize + threadIdx.x) * VEC_WIDTH;
         d = (d < D) ? d : 0;
-
+        
+        {%- if is_gwd_kernel %}
+        auto weights_slice = weights_row.load(d, qparams);
+        // Scale weights with global weight decay
+        weights_slice.mul_(global_weight_decay_j);
+        {%- else %}
         const auto weights_slice = weights_row.load(d, qparams);
+        {%- endif %}
         vals[inner_j*kMaxVecsPerThread + i] = weights_slice;
     }
 
@@ -258,6 +264,17 @@ using namespace fbgemm_gpu;
         [[maybe_unused]] {{ locs_or_addrs_type }} {{ locs_or_addrs_idx }} = (use_lxu_cache && placement == PlacementType::MANAGED_CACHING && l < L) ? {{ locs_or_addrs_tensor }}[indices_start + l] : 0;
         {%- endif %}
 
+        {%- if lxu_miss_rate == "cache_conflict_miss_rate::zero" and is_gwd_kernel %}
+        int64_t idx = l < L ? indices[indices_start + l] : 0; // only used for accessing prev_iter
+        {%- endif %}
+
+        {%- if is_gwd_kernel %}
+        // if l > L or prev_iter == 0, global_weight_decay = 1
+        const auto prev_it = prev_iter[idx];
+        CUDA_KERNEL_ASSERT(prev_it < iter);
+        const auto global_weight_decay = (l > L || prev_it == 0) ? 1 : max(gwd_lower_bound, powf(weight_decay_base, iter - prev_it - 1));
+        {%- endif %}
+
         {%- if weighted %}
         // Cooperatively load the positional weight indices
         at::acc_type<cache_t, true> idx_weight = l < L ? indice_weights[indices_start + l] : 0;
@@ -319,6 +336,10 @@ using namespace fbgemm_gpu;
 	        {%- if weighted %}
             at::acc_type<cache_t, true> idx_weight_j = idx_weight_j_[inner_j];
             {%- endif %}
+            {%- if is_gwd_kernel %}
+            const auto global_weight_decay_j = SHFL_SYNC(global_weight_decay, j);
+            {%- endif %}
+
 
 
             {#/**************************************************************/#}

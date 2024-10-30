@@ -169,51 +169,6 @@ using namespace fbgemm_gpu;
         output_j
 */#}
 {%- macro accumulate_and_store(from_cache) %}
-    {%- if from_cache %}
-    const cache_t* cache_weights;
-    {%- if ssd %}
-    cache_weights = reinterpret_cast<const cache_t*>(
-          *reinterpret_cast<uint64_t*>(&{{ locs_or_addrs_idx }}_j));
-    {%- else %}
-    cache_weights = reinterpret_cast<const cache_t*>(
-        &lxu_cache_weights[{{ locs_or_addrs_idx }}_j][0]);
-    {%- endif %}
-    {%- endif %}
-    {#-/* Set the weights row */#}
-    const auto weights_row = WeightRowAccessor
-        <
-            emb_t,
-            cache_t,
-            cache_t,
-            {%- if from_cache %}
-            true
-            {%- else %}
-            false
-            {%- endif %}
-        >(
-        {%- if from_cache %}
-        // Pass nullptr to avoid calling &weights[idx_j * D_emb], which loads
-        // memory into the registers as a side effect
-        nullptr,
-        // Load from the cache
-        cache_weights,
-        {%- else %}
-        // Load from the embedding table
-        &weights[idx_j * D_emb],
-        // Pass nullptr bc we are loading from the embedding table
-        nullptr,
-        {%- endif %}
-        D);
-
-    {#-/* Set the quantization params */#}
-    {%- if from_cache %}
-    // Assume cache is FP16/FP32, which doesn't require quantization params
-    const auto qparams = make_float2(0.0f, 0.0f);
-    {%- else %}
-    // Load the quantization params from the embedding table row if emb_t == uint8_t
-    const auto qparams = weights_row.load_qparams();
-    {%- endif %}
-
     {%- if not nobag %}
     // Iterate over the row in the weights table, in 4-element strides
     #pragma unroll kMaxVecsPerThread

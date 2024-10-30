@@ -221,10 +221,6 @@ using namespace fbgemm_gpu;
     for (int32_t i = 0;
         i < kMaxVecsPerThread && (i * kThreadGroupSize + threadIdx.x) * VEC_WIDTH < D;
         ++i) {
-        // Load the slice of the weights
-        const int32_t d = (i * kThreadGroupSize + threadIdx.x) * VEC_WIDTH;
-        const auto weights_slice = weights_row.load(d, qparams);
-
         {%- if weighted %}
         // Accumulate the weights * positional weight
         accumulators[i].fma_(vals[inner_j*kMaxVecsPerThread + i], idx_weight_j);
@@ -275,22 +271,35 @@ using namespace fbgemm_gpu;
         // Iterate over kThreadGroupSize indices
         // TODO: (avbokovoy) Take into account trailing iteration
         for (auto outer_j = 0; outer_j < kThreadGroupSize && l_start + outer_j < L; outer_j+=VAL_BLOCK) {
+            const auto l_offset = l_start + outer_j;
             {%- if dense or lxu_miss_rate != "cache_conflict_miss_rate::zero" %}
             // Load index from thread j in the group
-            [[maybe_unused]] int64_t idx_j_[VAL_BLOCK]; for (auto inner_j = 0; inner_j < VAL_BLOCK; ++inner_j)  idx_j_[inner_j] = SHFL_SYNC(idx, outer_j + inner_j);
+            [[maybe_unused]] int64_t idx_j_[VAL_BLOCK]; 
+            for (auto inner_j = 0; inner_j < VAL_BLOCK && l_offset + inner_j < L; ++inner_j)
+            {
+                idx_j_[inner_j] = SHFL_SYNC(idx, outer_j + inner_j);
+            }
             {%- endif %}
             {%- if not dense and lxu_miss_rate != "cache_conflict_miss_rate::all" %}
             // Load cache's index from thread j in the group
-            [[maybe_unused]] int32_t {{ locs_or_addrs_idx }}_j_[VAL_BLOCK]; for (auto inner_j = 0; inner_j < VAL_BLOCK; ++inner_j)  {{ locs_or_addrs_idx }}_j_[inner_j] = use_lxu_cache ? SHFL_SYNC({{ locs_or_addrs_idx }}, outer_j + inner_j) : 0;
+            [[maybe_unused]] int32_t {{ locs_or_addrs_idx }}_j_[VAL_BLOCK]; 
+            for (auto inner_j = 0; inner_j < VAL_BLOCK && l_offset + inner_j < L; ++inner_j)
+            {
+                {{ locs_or_addrs_idx }}_j_[inner_j] = use_lxu_cache ? SHFL_SYNC({{ locs_or_addrs_idx }}, outer_j + inner_j) : 0;
+            }
             {%- endif %}
 
-	    {%- if weighted %}
+	        {%- if weighted %}
             // Load positional weight index from thread j in the group
-            at::acc_type<cache_t, true> idx_weight_j_[VAL_BLOCK]; for (auto inner_j = 0; inner_j < VAL_BLOCK; ++inner_j) idx_weight_j_[inner_j] = SHFL_SYNC(idx_weight, outer_j + inner_j);
+            at::acc_type<cache_t, true> idx_weight_j_[VAL_BLOCK]; 
+            for (auto inner_j = 0; inner_j < VAL_BLOCK && l_offset + inner_j < L; ++inner_j)
+            {
+                idx_weight_j_[inner_j] = SHFL_SYNC(idx_weight, outer_j + inner_j);
+            }
             {%- endif %}
 
 
-        for (auto inner_j = 0; inner_j < VAL_BLOCK; ++inner_j) {
+        for (auto inner_j = 0; inner_j < VAL_BLOCK && l_offset + inner_j < L; ++inner_j) {
             auto j = outer_j + inner_j;
             {%- if is_index_select %}
             int64_t output_j = L_start + l_start + j;
@@ -299,7 +308,7 @@ using namespace fbgemm_gpu;
             {%- endif %}
 
             {%- if dense or lxu_miss_rate != "cache_conflict_miss_rate::zero" %}
-	    [[maybe_unused]] int64_t idx_j = idx_j_[inner_j];
+	        [[maybe_unused]] int64_t idx_j = idx_j_[inner_j];
             {%- endif %}
             {%- if not dense and lxu_miss_rate != "cache_conflict_miss_rate::all" %}
             [[maybe_unused]] {{ locs_or_addrs_type }} {{ locs_or_addrs_idx }}_j
@@ -307,7 +316,7 @@ using namespace fbgemm_gpu;
 
             // [[maybe_unused]] int32_t cache_idx_j = cache_idx_j_[inner_j];
             {%- endif %}
-	    {%- if weighted %}
+	        {%- if weighted %}
             at::acc_type<cache_t, true> idx_weight_j = idx_weight_j_[inner_j];
             {%- endif %}
 
@@ -346,7 +355,7 @@ using namespace fbgemm_gpu;
             {#/**************************************************************/#}
         }
         // Iterate over kThreadGroupSize indices
-        for (auto inner_j = 0; inner_j < VAL_BLOCK; ++inner_j) {
+        for (auto inner_j = 0; inner_j < VAL_BLOCK && l_offset + inner_j < L; ++inner_j) {
             auto j = outer_j + inner_j;
 
             {%- if is_index_select %}

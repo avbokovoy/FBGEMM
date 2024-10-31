@@ -196,8 +196,12 @@ using namespace fbgemm_gpu;
         at::acc_type<cache_t, true> idx_weight = l < L ? indice_weights[indices_start + l] : 0;
         {%- endif %}
 
+        #define VAL_BLOCK 4
+
         // Iterate over kThreadGroupSize indices
-        for (auto j = 0; j < kThreadGroupSize && l_start + j < L; ++j) {
+        for (auto outer_j = 0; outer_j < kThreadGroupSize && l_start + outer_j < L; ++outer_j) {
+        for (auto inner_j = 0; inner_j < VAL_BLOCK && l_start + outer_j + inner_j < L; ++inner_j) {
+            auto j = outer_j + inner_j;
             {%- if dense or lxu_miss_rate != "cache_conflict_miss_rate::zero" %}
             // Load index from thread j in the group
             [[maybe_unused]] int64_t idx_j = SHFL_SYNC(idx, j);
@@ -256,6 +260,7 @@ using namespace fbgemm_gpu;
 
             {%- endif %}
             {#/**************************************************************/#}
+        }
         }
     }
 {%- endmacro %}

@@ -262,7 +262,7 @@ using namespace fbgemm_gpu;
         // Cooperatively load the positional weight indices
         at::acc_type<cache_t, true> idx_weight = l < L ? indice_weights[indices_start + l] : 0;
         {%- endif %}
-        #define VAL_BLOCK 4
+        #define VAL_BLOCK 2
         {%- if not nobag %}
         Vec4T<cache_t> vals[VAL_BLOCK*kMaxVecsPerThread];        
         {%- else %}

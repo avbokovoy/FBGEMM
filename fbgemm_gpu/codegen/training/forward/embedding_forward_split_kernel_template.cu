@@ -221,10 +221,6 @@ using namespace fbgemm_gpu;
     for (int32_t i = 0;
         i < kMaxVecsPerThread && (i * kThreadGroupSize + threadIdx.x) * VEC_WIDTH < D;
         ++i) {
-        // Load the slice of the weights
-        const int32_t d = (i * kThreadGroupSize + threadIdx.x) * VEC_WIDTH;
-        const auto weights_slice = weights_row.load(d, qparams);
-
         {%- if weighted %}
         // Accumulate the weights * positional weight
         accumulators[i].fma_(vals[inner_j*kMaxVecsPerThread + i], idx_weight_j);
@@ -346,7 +342,7 @@ using namespace fbgemm_gpu;
             {#/**************************************************************/#}
         }
         // Iterate over kThreadGroupSize indices
-        for (auto inner_j = 0; inner_j < VAL_BLOCK; ++inner_j) {
+        for (auto inner_j = 0; inner_j < VAL_BLOCK && (l_start + outer_j + inner_j < L) < L; ++inner_j) {
             auto j = outer_j + inner_j;
 
             {%- if is_index_select %}

@@ -286,7 +286,7 @@ using namespace fbgemm_gpu;
             {%- endif %}
 
 
-        for (auto inner_j = 0; inner_j < VAL_BLOCK && (l_start + outer_j + inner_j < L) < L;; ++inner_j) {
+        for (auto inner_j = 0; inner_j < VAL_BLOCK && (l_start + outer_j + inner_j < L) < L; ++inner_j) {
             auto j = outer_j + inner_j;
             {%- if is_index_select %}
             int64_t output_j = L_start + l_start + j;

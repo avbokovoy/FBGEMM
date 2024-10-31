@@ -229,7 +229,7 @@ using namespace fbgemm_gpu;
         // Cooperatively load the positional weight indices
         at::acc_type<cache_t, true> idx_weight = l < L ? indice_weights[indices_start + l] : 0;
         {%- endif %}
-        #define VAL_BLOCK 2
+        #define VAL_BLOCK 4
         {%- if not nobag %}
         Vec4T<cache_t> vals[VAL_BLOCK*kMaxVecsPerThread];        
         {%- endif %}
@@ -237,10 +237,11 @@ using namespace fbgemm_gpu;
         // TODO: (avbokovoy) Take into account trailing iteration
         for (auto outer_j = 0; outer_j < kThreadGroupSize && l_start + outer_j < L; outer_j+=VAL_BLOCK) {
             const auto l_offset = l_start + outer_j;
+            const auto inner_bound = (l_start + outer_j + VAL_BLOCK >= L ? L - l_offset : VAL_BLOCK);
             {%- if dense or lxu_miss_rate != "cache_conflict_miss_rate::zero" %}
             // Load index from thread j in the group
             [[maybe_unused]] int64_t idx_j_[VAL_BLOCK]; 
-            for (auto inner_j = 0; inner_j < VAL_BLOCK && l_offset + inner_j < L; ++inner_j)
+            for (auto inner_j = 0; inner_j < inner_bound; ++inner_j)
             {
                 idx_j_[inner_j] = SHFL_SYNC(idx, outer_j + inner_j);
             }
@@ -248,7 +249,7 @@ using namespace fbgemm_gpu;
             {%- if not dense and lxu_miss_rate != "cache_conflict_miss_rate::all" %}
             // Load cache's index from thread j in the group
             [[maybe_unused]] int32_t {{ locs_or_addrs_idx }}_j_[VAL_BLOCK]; 
-            for (auto inner_j = 0; inner_j < VAL_BLOCK && l_offset + inner_j < L; ++inner_j)
+            for (auto inner_j = 0; inner_j < inner_bound; ++inner_j)
             {
                 {{ locs_or_addrs_idx }}_j_[inner_j] = use_lxu_cache ? SHFL_SYNC({{ locs_or_addrs_idx }}, outer_j + inner_j) : 0;
             }
@@ -257,14 +258,14 @@ using namespace fbgemm_gpu;
 	        {%- if weighted %}
             // Load positional weight index from thread j in the group
             at::acc_type<cache_t, true> idx_weight_j_[VAL_BLOCK]; 
-            for (auto inner_j = 0; inner_j < VAL_BLOCK && l_offset + inner_j < L; ++inner_j)
+            for (auto inner_j = 0; inner_j < inner_bound; ++inner_j)
             {
                 idx_weight_j_[inner_j] = SHFL_SYNC(idx_weight, outer_j + inner_j);
             }
             {%- endif %}
 
 
-        for (auto inner_j = 0; inner_j < VAL_BLOCK && l_offset + inner_j < L; ++inner_j) {
+        for (auto inner_j = 0; inner_j < inner_bound; ++inner_j) {
             auto j = outer_j + inner_j;
             {%- if is_index_select %}
             int64_t output_j = L_start + l_start + j;
@@ -321,7 +322,7 @@ using namespace fbgemm_gpu;
         }
         {%-if not nobag %}
         // Iterate over kThreadGroupSize indices
-        for (auto inner_j = 0; inner_j < VAL_BLOCK && l_offset + inner_j < L; ++inner_j) {
+        for (auto inner_j = 0; inner_j < inner_bound; ++inner_j) {
             auto j = outer_j + inner_j;
 
             {%- if is_index_select %}

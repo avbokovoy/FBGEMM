@@ -41,6 +41,10 @@ class IndexSelectGenerator:
                 "gen_batch_index_select_dim0_forward_kernel.cu",
             ),
             (
+                "training/forward/rocm/embedding_forward_split_kernel_template.hip",
+                "gen_batch_index_select_dim0_forward_rocm_kernel.hip",
+            ),
+            (
                 "training/forward/embedding_forward_split_kernel_nobag_small_template.cu",
                 "gen_batch_index_select_dim0_forward_kernel_small.cu",
             ),

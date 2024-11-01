@@ -165,6 +165,26 @@ class ForwardSplitGenerator:
             is_gwd=True,
         )
 
+        # Generate the HIP kernels
+        ForwardSplitGenerator.render_forward_templates(
+            "training/forward/rocm/embedding_forward_split_kernel_template.hip",
+            "gen_embedding_forward_{}_rocm_kernel.hip",
+            dense_options=[True, False],
+            nobag_options=[True, False],
+            vbe_options=[True, False],
+            ssd_options=[True, False],
+        )
+        # Generate the global weight decay HIP kernels
+        ForwardSplitGenerator.render_forward_templates(
+            "training/forward/rocm/embedding_forward_split_kernel_template.hip",
+            "gen_embedding_forward_{}_gwd_rocm_kernel.hip",
+            dense_options=[False],
+            nobag_options=[False],
+            vbe_options=[True, False],
+            ssd_options=[False],
+            is_gwd=True,
+        )
+
         # Generate the v2 CUDA kernels
         ForwardSplitGenerator.render_forward_templates(
             "training/forward/embedding_forward_split_kernel_v2_template.cu",

@@ -31,6 +31,11 @@
 #include "fbgemm_gpu/utils/dispatch_macros.h"
 {%- endif %}
 
+{%- if is_rocm %}
+#include <iostream>
+// #include "rocm/embedding_forward_split_kernel_template.hip"
+{%- endif %}
+
 {%- if not is_index_select %}
 ////////////////////////////////////////////////////////////////////////////////
 // Required for op registrations
@@ -207,6 +212,92 @@ batch_index_select_dim0_codegen_forward_kernel(
 {%- endif %} {#-/* if is_valid_forward_config(...) */#}
 {%- endfor %} {#-/* for nobag in [True, False] */#}
 
+// Declare HIP optimized kernels
+{%- if is_rocm %}
+{%- for nobag in ([True, False] if (not is_gwd) else [False]) %}
+{%- set ndesc = "_nobag" if nobag else "" %}
+{%- if is_valid_forward_config(nobag, weighted, vbe, is_index_select) %}
+{%- set has_experimental = has_experimental_support(dense, nobag, vbe, is_index_select, ssd) %}
+
+{%- set is_gwd_kernel = is_gwd and is_valid_gwd_config(
+    dense,
+    nobag,
+    vbe,
+    is_index_select,
+    has_global_weight_decay_support=True,
+    ssd=ssd) %}
+template <
+    typename emb_t,
+    typename cache_t,
+    typename output_t,
+    {%- if not dense %}
+    bool use_lxu_cache,
+    {%- endif %}
+    typename index_t,
+    {%- if not nobag %}
+    size_t kMaxVecsPerThread,
+    {%- endif %}
+    size_t kThreadGroupSize = kWarpSize
+    >
+__launch_bounds__(kForwardMaxThreads) __global__ void
+{%- if is_index_select %}
+hip_batch_index_select_dim0_codegen_forward_kernel(
+{%- else %}
+hip_{{ mdesc }}_embedding{{ ndesc }}_codegen_forward_{{ get_desc_suffix(is_gwd_kernel) }}_kernel(
+{%- endif %}
+    const pta::PackedTensorAccessor64<emb_t, 1, at::RestrictPtrTraits> dev_weights,
+    {%- if not dense %}
+    const pta::PackedTensorAccessor64<emb_t, 1, at::RestrictPtrTraits> uvm_weights,
+    const pta::PackedTensorAccessor64<cache_t, 2, at::RestrictPtrTraits> lxu_cache_weights,
+    const pta::PackedTensorAccessor32<int32_t, 1, at::RestrictPtrTraits> weights_placements,
+    {%- endif %}
+    const pta::PackedTensorAccessor32<int64_t, 1, at::RestrictPtrTraits> weights_offsets,
+    {%- if not nobag or is_index_select %}
+    const pta::PackedTensorAccessor32<int32_t, 1, at::RestrictPtrTraits> D_offsets,
+    {%- else %}
+    int64_t D,
+    {%- endif %}
+    {%- if vbe %}
+    const pta::PackedTensorAccessor32<int64_t, 1, at::RestrictPtrTraits> row_output_offsets,
+    const pta::PackedTensorAccessor32<int32_t, 1, at::RestrictPtrTraits> b_t_map,
+    const int32_t info_B_num_bits,
+    const uint32_t info_B_mask,
+    {%- else %}
+    FixedDivisor fd_B,
+    {%- endif %}
+    const pta::PackedTensorAccessor32<index_t, 1, at::RestrictPtrTraits> indices,
+    {%- if not is_index_select %}
+    const pta::PackedTensorAccessor32<index_t, 1, at::RestrictPtrTraits> offsets,
+    {%- endif %}
+    {%- if not nobag %}
+    int64_t pooling_mode,
+    {%- endif %}
+    {%- if weighted %}
+    pta::PackedTensorAccessor32<at::acc_type<cache_t, true>, 1, at::RestrictPtrTraits> indice_weights,
+    {%- endif %}
+    {%- if not dense %}
+    const pta::PackedTensorAccessor32<{{ locs_or_addrs_type }}, 1, at::RestrictPtrTraits> {{ locs_or_addrs_tensor }},
+    const int32_t* lxu_cache_conflict_misses,
+    {%- endif %}
+    {%- if is_index_select %}
+    const pta::PackedTensorAccessor32<int64_t, 1, at::RestrictPtrTraits> output_offsets,
+    const pta::PackedTensorAccessor32<int64_t, 1, at::RestrictPtrTraits> total_L_offsets,
+    const int32_t fixed_L_per_warp,
+    const bool permute_output_dim_0_1,
+    {%- endif %} // if dense
+    {%- if is_gwd_kernel %}
+    const pta::PackedTensorAccessor32<int64_t, 1, at::RestrictPtrTraits> hash_size_cumsum,
+    const pta::PackedTensorAccessor64<float, 1, at::RestrictPtrTraits> prev_iter_dev,
+    const float learning_rate,
+    const float weight_decay,
+    const int64_t iter,
+    const float gwd_lower_bound,
+    {%- endif %}
+    pta::PackedTensorAccessor64<output_t, {{ "1" if is_index_select else "2" }}, at::RestrictPtrTraits> output
+    );
+{%- endif %} {#-/* if is_valid_forward_config(...) */#}
+{%- endfor %} {#-/* for nobag in [True, False] */#}
+{%- endif %} {#-/* if is_rocm */#}
 
 ////////////////////////////////////////////////////////////////////////////////
 // Utility Macros
@@ -308,7 +399,6 @@ batch_index_select_dim0_codegen_forward_kernel(
     {%- endif %}
   }()
 
-
 ////////////////////////////////////////////////////////////////////////////////
 // Kernel Definitions
 ////////////////////////////////////////////////////////////////////////////////
@@ -327,6 +417,27 @@ batch_index_select_dim0_codegen_forward_kernel(
     has_global_weight_decay_support=True,
     ssd=ssd) %}
 {%- set desc_suffix = get_desc_suffix(is_gwd_kernel) %}
+{#-
+  /* Generates support guard for optimized HIP kernel. Current limitation
+     is L % 4 == 0.
+   */
+#}
+#define CHECK_HIP_SUPPORT_RANGE()                                              \
+    bool mixed_Ls = true; \
+    bool divisible_by_4 = false; \
+    {%- if nobag or is_index_select %}
+    mixed_Ls = false; \
+    {%- endif %}
+    {%- if not nobag or is_index_select %}
+    divisible_by_4 = dev_weights.numel() / T / max_D % 4 == 0; \
+    {%- else %}
+    divisible_by_4 = dev_weights.numel() / T / D % 4 == 0; \
+    {%- endif %}
+    {%- if not nobag %}
+    mixed_Ls = (total_D != (max_D * T)); \
+    {%- endif %}
+    is_rocm_kernel_supported = !mixed_Ls && divisible_by_4;
+
 Tensor
 {%- if is_index_select %}
 batch_index_select_dim0_codegen_forward_cuda(
@@ -641,13 +752,40 @@ batch_index_select_dim0_codegen_forward_cuda(
 #ifdef FBGEMM_GPU_MEMCHECK
           const auto func_name = "{{ nobag_kernel }}";
 #endif
-
-          {{ nobag_kernel }}
+          auto forward_kernel = {{ nobag_kernel }}
             {%- if dense or is_index_select %}
-            <emb_t, cache_t, output_t, int64_t>
+            <emb_t, cache_t, output_t, int64_t>;
             {%- else %}
-            <emb_t, cache_t, output_t, use_cache_t, int64_t>
+            <emb_t, cache_t, output_t, use_cache_t, int64_t>;
+            {%- endif %};
+
+          {%- if is_rocm %}
+          bool is_rocm_kernel_supported = false;
+          CHECK_HIP_SUPPORT_RANGE()
+
+          if(is_rocm_kernel_supported)
+          {
+            std::cout << "Calling hip kernel" << std::endl;
+            {%- if is_index_select %}
+            forward_kernel = hip_batch_index_select_dim0_codegen_forward_kernel
+              {%- if dense or is_index_select %}
+              <emb_t, cache_t, output_t, int64_t>;
+              {%- else %}
+              <emb_t, cache_t, output_t, use_cache_t, int64_t>;
+              {%- endif %};
+            {% else %}
+            forward_kernel = hip_{{ mdesc }}_embedding_nobag_codegen_forward_unweighted_kernel
+              {%- if dense or is_index_select %}
+              <emb_t, cache_t, output_t, int64_t>;
+              {%- else %}
+              <emb_t, cache_t, output_t, use_cache_t, int64_t>;
+              {%- endif %};
             {%- endif %}
+          }
+          {%- endif %}
+
+
+          forward_kernel
             <<<
               div_round_up(total_B, kForwardMaxThreads / kWarpSize),
               dim3(kWarpSize, kForwardMaxThreads / kWarpSize),
@@ -710,7 +848,7 @@ batch_index_select_dim0_codegen_forward_cuda(
             // kMaxVecsPerThread and kFixedMaxVecsPerThread are the same
             // forward
             constexpr auto kMaxVecsPerThread = kFixedMaxVecsPerThread;
-            {{ mdesc }}_embedding_codegen_forward_{{ desc_suffix }}_kernel
+            auto forward_kernel = {{ mdesc }}_embedding_codegen_forward_{{ desc_suffix }}_kernel
                 <emb_t,
                 cache_t,
                 output_t,
@@ -719,7 +857,29 @@ batch_index_select_dim0_codegen_forward_cuda(
                 {%- endif %}
                 int64_t,
                 kMaxVecsPerThread,
-                kThreadGroupSize>
+                kThreadGroupSize>;
+
+            {%- if is_rocm %}
+            bool is_rocm_kernel_supported = false;
+            CHECK_HIP_SUPPORT_RANGE()
+
+            if( is_rocm_kernel_supported )
+            {
+              std::cout << "Calling hip kernel" << std::endl;
+              forward_kernel = hip_{{ mdesc }}_embedding_codegen_forward_{{ desc_suffix }}_kernel
+                  <emb_t,
+                  cache_t,
+                  output_t,
+                  {%- if not dense%}
+                  use_cache_t,
+                  {%- endif %}
+                  int64_t,
+                  kMaxVecsPerThread,
+                  kThreadGroupSize>;
+            }
+            {%- endif %}
+
+            forward_kernel    
               <<<
                 div_round_up(total_B, kForwardMaxThreads / kThreadGroupSize),
                 dim3(kThreadGroupSize, kForwardMaxThreads / kThreadGroupSize),
@@ -823,6 +983,7 @@ batch_index_select_dim0_codegen_forward_cuda(
   return output;
 }
 
+#undef CHECK_HIP_SUPPORT_RANGE
 
 ////////////////////////////////////////////////////////////////////////////////
 // Op registrations

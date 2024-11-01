@@ -631,6 +631,30 @@ if(USE_ROCM)
   hipify(CUDA_SOURCE_DIR ${PROJECT_SOURCE_DIR}
         HEADER_INCLUDE_DIR ${header_include_dir})
 
+  list(APPEND fbgemm_gpu_sources_gen
+      "gen_batch_index_select_dim0_forward_rocm_kernel.hip")
+
+  foreach(wdesc ${WEIGHT_OPTIONS})
+    list(APPEND fbgemm_gpu_sources_gen
+        "gen_embedding_forward_dense_${wdesc}_rocm_kernel.hip"
+        "gen_embedding_forward_split_${wdesc}_rocm_kernel.hip"
+        "gen_embedding_forward_ssd_${wdesc}_rocm_kernel.hip")
+  endforeach()
+
+  # Generate VBE files
+  foreach(wdesc weighted unweighted)
+    list(APPEND fbgemm_gpu_sources_gen
+        "gen_embedding_forward_split_${wdesc}_vbe_rocm_kernel.hip"
+        "gen_embedding_forward_dense_${wdesc}_vbe_rocm_kernel.hip")
+  endforeach()
+
+  # Generate GWD files
+  foreach(wdesc weighted unweighted)
+    list(APPEND fbgemm_gpu_sources_gen
+        "gen_embedding_forward_split_${wdesc}_vbe_gwd_rocm_kernel.hip"
+        "gen_embedding_forward_split_${wdesc}_gwd_rocm_kernel.hip")
+  endforeach()
+
   # Get the absolute paths of all generated sources
   set(fbgemm_gpu_sources_gen_abs)
   foreach(source_gen_filename ${fbgemm_gpu_sources_gen})

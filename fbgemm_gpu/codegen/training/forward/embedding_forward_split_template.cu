@@ -33,6 +33,8 @@
 
 {%- if is_rocm %}
 #include <iostream>
+#include <thrust/count.h>
+#include <thrust/device_vector.h>
 // #include "rocm/embedding_forward_split_kernel_template.hip"
 {%- endif %}
 
@@ -399,10 +401,44 @@ hip_{{ mdesc }}_embedding{{ ndesc }}_codegen_forward_{{ get_desc_suffix(is_gwd_k
     {%- endif %}
   }()
 
+{#-
+  /* Generates support guard for optimized HIP kernel. Current limitation
+     is L % 4 == 0.
+   */
+#}
+{%- if is_rocm %}
+template <typename T>
+struct is_odd : public thrust::unary_function<T,bool>
+{
+    __host__ __device__
+    bool operator()(T x)
+    {
+        return (x % 4) == 0;
+    }
+};
+
+// Check if ROCm optimized kernel is supported
+#define CHECK_HIP_SUPPORT_RANGE(OUT_FLAG)                                           \
+{                                                                                   \
+    bool divisible_by_4 = false;                                                    \
+    {%- if is_index_select %}
+    const int64_t numel = total_L_offsets.numel();                                  \
+    thrust::device_ptr<int64_t> first(total_L_offsets.data_ptr<int64_t>());         \
+    thrust::device_ptr<int64_t> last(total_L_offsets.data_ptr<int64_t>() + numel);  \
+    {%- else %}
+    const int64_t numel = offsets.numel();                                          \
+    thrust::device_ptr<int64_t> first(offsets.data_ptr<int64_t>());                 \
+    thrust::device_ptr<int64_t> last(offsets.data_ptr<int64_t>() + numel);          \
+    {%- endif %}
+    const int64_t result = thrust::count_if(first, last, is_odd<int64_t>());        \
+    divisible_by_4 = (result == numel);                                             \
+    OUT_FLAG = divisible_by_4;                                                      \
+}
+{%- endif %}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Kernel Definitions
 ////////////////////////////////////////////////////////////////////////////////
-
 {%- for nobag in ([True, False] if (not is_gwd) else [False]) %}
 {%- set ndesc = "_nobag" if nobag else "" %}
 {%- if is_valid_forward_config(nobag, weighted, vbe, is_index_select) %}
@@ -417,26 +453,6 @@ hip_{{ mdesc }}_embedding{{ ndesc }}_codegen_forward_{{ get_desc_suffix(is_gwd_k
     has_global_weight_decay_support=True,
     ssd=ssd) %}
 {%- set desc_suffix = get_desc_suffix(is_gwd_kernel) %}
-{#-
-  /* Generates support guard for optimized HIP kernel. Current limitation
-     is L % 4 == 0.
-   */
-#}
-#define CHECK_HIP_SUPPORT_RANGE()                                              \
-    bool mixed_Ls = true; \
-    bool divisible_by_4 = false; \
-    {%- if nobag or is_index_select %}
-    mixed_Ls = false; \
-    {%- endif %}
-    {%- if not nobag or is_index_select %}
-    divisible_by_4 = dev_weights.numel() / T / max_D % 4 == 0; \
-    {%- else %}
-    divisible_by_4 = dev_weights.numel() / T / D % 4 == 0; \
-    {%- endif %}
-    {%- if not nobag %}
-    mixed_Ls = (total_D != (max_D * T)); \
-    {%- endif %}
-    is_rocm_kernel_supported = !mixed_Ls && divisible_by_4;
 
 Tensor
 {%- if is_index_select %}
@@ -761,7 +777,7 @@ batch_index_select_dim0_codegen_forward_cuda(
 
           {%- if is_rocm %}
           bool is_rocm_kernel_supported = false;
-          CHECK_HIP_SUPPORT_RANGE()
+          CHECK_HIP_SUPPORT_RANGE(is_rocm_kernel_supported)
 
           if(is_rocm_kernel_supported)
           {
@@ -861,7 +877,7 @@ batch_index_select_dim0_codegen_forward_cuda(
 
             {%- if is_rocm %}
             bool is_rocm_kernel_supported = false;
-            CHECK_HIP_SUPPORT_RANGE()
+            CHECK_HIP_SUPPORT_RANGE(is_rocm_kernel_supported)
 
             if( is_rocm_kernel_supported )
             {
@@ -982,8 +998,6 @@ batch_index_select_dim0_codegen_forward_cuda(
 
   return output;
 }
-
-#undef CHECK_HIP_SUPPORT_RANGE
 
 ////////////////////////////////////////////////////////////////////////////////
 // Op registrations

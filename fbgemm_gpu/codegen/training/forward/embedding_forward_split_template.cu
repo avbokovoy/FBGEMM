@@ -32,10 +32,8 @@
 {%- endif %}
 
 {%- if is_rocm %}
-#include <iostream>
 #include <thrust/count.h>
 #include <thrust/device_vector.h>
-// #include "rocm/embedding_forward_split_kernel_template.hip"
 {%- endif %}
 
 {%- if not is_index_select %}
@@ -781,7 +779,6 @@ batch_index_select_dim0_codegen_forward_cuda(
 
           if(is_rocm_kernel_supported)
           {
-            std::cout << "Calling hip kernel" << std::endl;
             {%- if is_index_select %}
             forward_kernel = hip_batch_index_select_dim0_codegen_forward_kernel
               {%- if dense or is_index_select %}
@@ -881,7 +878,6 @@ batch_index_select_dim0_codegen_forward_cuda(
 
             if( is_rocm_kernel_supported )
             {
-              std::cout << "Calling hip kernel" << std::endl;
               forward_kernel = hip_{{ mdesc }}_embedding_codegen_forward_{{ desc_suffix }}_kernel
                   <emb_t,
                   cache_t,

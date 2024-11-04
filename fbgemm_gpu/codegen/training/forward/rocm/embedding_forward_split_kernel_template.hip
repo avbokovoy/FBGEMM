@@ -38,15 +38,10 @@
 using Tensor = at::Tensor;
 using namespace fbgemm_gpu;
 
-#define VAL_BLOCK 4
-
 {#-/*
-    This code chunk describes the weights load + accumulate step in the
-    forward kernel, containing 3 steps:
-
-    1. Set up the WeightRow
-    1. Load the quantization params
-    1. Load and accumulate the slices of values from the row
+    This code chunk describes the weights load in forward kernel. Set up
+    the WeightRow and load quantization parameters. Shortcut store for nobag 
+    mode.
 
     The main difference is in whether the slices are loaded from the embedding
     table or cache.
@@ -58,6 +53,7 @@ using namespace fbgemm_gpu;
     In-code variables that are defined outside:
         emb_t, cache_t, cache_t
         idx_j
+        inner_j
         D_emb
         lxu_cache_weights
         {{ locs_or_addrs_idx }}_j
@@ -122,7 +118,7 @@ using namespace fbgemm_gpu;
         int32_t d = (i * kThreadGroupSize + threadIdx.x) * VEC_WIDTH;
         d = (d < D) ? d : 0;
         const auto weights_slice = weights_row.load(d, qparams);
-        vals[inner_j*kMaxVecsPerThread + i] = weights_slice;
+        vals[inner_j * kMaxVecsPerThread + i] = weights_slice;
     }
 
     {%- else %}
@@ -144,12 +140,10 @@ using namespace fbgemm_gpu;
 {%- endmacro %}
 
 {#-/*
-    This code chunk describes the weights load + accumulate step in the
-    forward kernel, containing 3 steps:
-
-    1. Set up the WeightRow
-    1. Load the quantization params
-    1. Load and accumulate the slices of values from the row
+    This code chunk describes the weights accumulate step in the
+    forward kernel. Accumulate the slices of values from the row.
+    Does nothing for nobag mode assuming all the work is done in
+    load() macro.
 
     The main difference is in whether the slices are loaded from the embedding
     table or cache.
@@ -161,6 +155,7 @@ using namespace fbgemm_gpu;
     In-code variables that are defined outside:
         emb_t, cache_t, cache_t
         idx_j
+        inner_j
         D_emb
         lxu_cache_weights
         cache_idx_j
@@ -179,14 +174,14 @@ using namespace fbgemm_gpu;
         ++i) {
         {%- if is_gwd_kernel %}
         // Scale weights with global weight decay
-        vals[inner_j*kMaxVecsPerThread + i].mul_(global_weight_decay_j);
+        vals[inner_j * kMaxVecsPerThread + i].mul_(global_weight_decay_j);
         {%- endif %}
         {%- if weighted %}
         // Accumulate the weights * positional weight
-        accumulators[i].fma_(vals[inner_j*kMaxVecsPerThread + i], idx_weight_j);
+        accumulators[i].fma_(vals[inner_j * kMaxVecsPerThread + i], idx_weight_j);
         {%- else %}
         // Accumulate the weights
-        accumulators[i].add_(vals[inner_j*kMaxVecsPerThread + i]);
+        accumulators[i].add_(vals[inner_j * kMaxVecsPerThread + i]);
         {%- endif %}
     }
     {%- endif %}
@@ -232,24 +227,24 @@ using namespace fbgemm_gpu;
         at::acc_type<cache_t, true> idx_weight = l < L ? indice_weights[indices_start + l] : 0;
         {%- endif %}
         {%- if not nobag %}
-        Vec4T<cache_t> vals[VAL_BLOCK*kMaxVecsPerThread];        
+        Vec4T<cache_t> vals[kManualUnrollLength*kMaxVecsPerThread];        
         {%- endif %}
         // Iterate over kThreadGroupSize indices
         // TODO: (avbokovoy) Take into account trailing iteration
-        for (auto outer_j = 0; outer_j < kThreadGroupSize && l_start + outer_j < L; outer_j+=VAL_BLOCK) {
+        for (auto outer_j = 0; outer_j < kThreadGroupSize && l_start + outer_j < L; outer_j+=kManualUnrollLength) {
             const auto l_offset = l_start + outer_j;
             {%- if dense or lxu_miss_rate != "cache_conflict_miss_rate::zero" %}
             // Load index from thread j in the group
-            [[maybe_unused]] int64_t idx_j_[VAL_BLOCK]; 
-            for (auto inner_j = 0; inner_j < VAL_BLOCK; ++inner_j)
+            [[maybe_unused]] int64_t idx_j_[kManualUnrollLength]; 
+            for (auto inner_j = 0; inner_j < kManualUnrollLength; ++inner_j)
             {
                 idx_j_[inner_j] = SHFL_SYNC(idx, outer_j + inner_j);
             }
             {%- endif %}
             {%- if not dense and lxu_miss_rate != "cache_conflict_miss_rate::all" %}
             // Load cache's index from thread j in the group
-            [[maybe_unused]] int32_t {{ locs_or_addrs_idx }}_j_[VAL_BLOCK]; 
-            for (auto inner_j = 0; inner_j < VAL_BLOCK; ++inner_j)
+            [[maybe_unused]] int32_t {{ locs_or_addrs_idx }}_j_[kManualUnrollLength]; 
+            for (auto inner_j = 0; inner_j < kManualUnrollLength; ++inner_j)
             {
                 {{ locs_or_addrs_idx }}_j_[inner_j] = use_lxu_cache ? SHFL_SYNC({{ locs_or_addrs_idx }}, outer_j + inner_j) : 0;
             }
@@ -257,15 +252,15 @@ using namespace fbgemm_gpu;
 
 	        {%- if weighted %}
             // Load positional weight index from thread j in the group
-            at::acc_type<cache_t, true> idx_weight_j_[VAL_BLOCK]; 
-            for (auto inner_j = 0; inner_j < VAL_BLOCK; ++inner_j)
+            at::acc_type<cache_t, true> idx_weight_j_[kManualUnrollLength]; 
+            for (auto inner_j = 0; inner_j < kManualUnrollLength; ++inner_j)
             {
                 idx_weight_j_[inner_j] = SHFL_SYNC(idx_weight, outer_j + inner_j);
             }
             {%- endif %}
 
 
-        for (auto inner_j = 0; inner_j < VAL_BLOCK; ++inner_j) {
+        for (auto inner_j = 0; inner_j < kManualUnrollLength; ++inner_j) {
             auto j = outer_j + inner_j;
             {%- if is_index_select %}
             int64_t output_j = L_start + l_start + j;
@@ -322,7 +317,7 @@ using namespace fbgemm_gpu;
         }
         {%-if not nobag %}
         // Iterate over kThreadGroupSize indices
-        for (auto inner_j = 0; inner_j < VAL_BLOCK; ++inner_j) {
+        for (auto inner_j = 0; inner_j < kManualUnrollLength; ++inner_j) {
             auto j = outer_j + inner_j;
 
             {%- if is_index_select %}
@@ -479,6 +474,7 @@ hip_{{ mdesc }}_embedding{{ ndesc }}_codegen_forward_{{ desc_suffix }}_kernel(
 
     // Elements are processed 4 at a time through fbgemm_gpu::Vec4 (CUDA float4, 16 bytes)
     constexpr int VEC_WIDTH = 4;
+    constexpr int kManualUnrollLength = 4;
 
     // Determine the linearized warp ID, and exit early if needed
     int32_t b_t = blockIdx.x * blockDim.y + threadIdx.y;

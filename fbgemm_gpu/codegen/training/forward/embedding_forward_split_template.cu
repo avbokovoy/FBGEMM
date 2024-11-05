@@ -774,8 +774,8 @@ batch_index_select_dim0_codegen_forward_cuda(
             {%- endif %};
 
           {%- if is_rocm %}
-          bool is_rocm_kernel_supported = false;
-          CHECK_HIP_SUPPORT_RANGE(is_rocm_kernel_supported)
+          bool is_rocm_kernel_supported = true;
+          // CHECK_HIP_SUPPORT_RANGE(is_rocm_kernel_supported)
 
           if(is_rocm_kernel_supported)
           {
@@ -873,8 +873,8 @@ batch_index_select_dim0_codegen_forward_cuda(
                 kThreadGroupSize>;
 
             {%- if is_rocm %}
-            bool is_rocm_kernel_supported = false;
-            CHECK_HIP_SUPPORT_RANGE(is_rocm_kernel_supported)
+            bool is_rocm_kernel_supported = true;
+            // CHECK_HIP_SUPPORT_RANGE(is_rocm_kernel_supported)
 
             if( is_rocm_kernel_supported )
             {

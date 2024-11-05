@@ -38,6 +38,97 @@
 using Tensor = at::Tensor;
 using namespace fbgemm_gpu;
 
+{%- macro load_and_accumulate(from_cache) %}
+    {%- if from_cache %}
+    const cache_t* cache_weights;
+    {%- if ssd %}
+    cache_weights = reinterpret_cast<const cache_t*>(
+          *reinterpret_cast<uint64_t*>(&{{ locs_or_addrs_idx }}_j));
+    {%- else %}
+    cache_weights = reinterpret_cast<const cache_t*>(
+        &lxu_cache_weights[{{ locs_or_addrs_idx }}_j][0]);
+    {%- endif %}
+    {%- endif %}
+    {#-/* Set the weights row */#}
+    const auto weights_row = WeightRowAccessor
+        <
+            emb_t,
+            cache_t,
+            cache_t,
+            {%- if from_cache %}
+            true
+            {%- else %}
+            false
+            {%- endif %}
+        >(
+        {%- if from_cache %}
+        // Pass nullptr to avoid calling &weights[idx_j * D_emb], which loads
+        // memory into the registers as a side effect
+        nullptr,
+        // Load from the cache
+        cache_weights,
+        {%- else %}
+        // Load from the embedding table
+        &weights[idx_j * D_emb],
+        // Pass nullptr bc we are loading from the embedding table
+        nullptr,
+        {%- endif %}
+        D);
+
+    {#-/* Set the quantization params */#}
+    {%- if from_cache %}
+    // Assume cache is FP16/FP32, which doesn't require quantization params
+    const auto qparams = make_float2(0.0f, 0.0f);
+    {%- else %}
+    // Load the quantization params from the embedding table row if emb_t == uint8_t
+    const auto qparams = weights_row.load_qparams();
+    {%- endif %}
+
+    {%- if not nobag %}
+    // Iterate over the row in the weights table, in 4-element strides
+    #pragma unroll kMaxVecsPerThread
+    for (int32_t i = 0;
+        i < kMaxVecsPerThread && (i * kThreadGroupSize + threadIdx.x) * VEC_WIDTH < D;
+        ++i) {
+        // Load the slice of the weights
+        const int32_t d = (i * kThreadGroupSize + threadIdx.x) * VEC_WIDTH;
+
+        {%- if is_gwd_kernel %}
+        auto weights_slice = weights_row.load(d, qparams);
+        // Scale weights with global weight decay
+        weights_slice.mul_(global_weight_decay_j);
+        {%- else %}
+        const auto weights_slice = weights_row.load(d, qparams);
+        {%- endif %}
+
+        {%- if weighted %}
+        // Accumulate the weights * positional weight
+        accumulators[i].fma_(weights_slice, idx_weight_j);
+        {%- else %}
+        // Accumulate the weights
+        accumulators[i].add_(weights_slice);
+        {%- endif %}
+    }
+
+    {%- else %}
+    for (int32_t i = 0; i < D; i += kThreadGroupSize * VEC_WIDTH) {
+        const int32_t d = i + threadIdx.x * VEC_WIDTH;
+        if (d < D) {
+            // Since there is no pooling, simply copy the weights to output
+            const auto weights_slice = weights_row.load(d, qparams);
+            {%- if is_index_select %}
+            // output is 1D (because the stride can be irregular)
+            weights_slice.store(&output[output_offset + output_j * output_stride + d]);
+            {%- else %}
+            // output is 2D
+            weights_slice.store(&output[output_j][d]);
+            {%- endif %}
+        }
+    }
+    {%- endif %}
+{%- endmacro %}
+
+
 {#-/*
     This code chunk describes the weights load in forward kernel. Set up
     the WeightRow and load quantization parameters. Shortcut store for nobag 
@@ -231,7 +322,7 @@ using namespace fbgemm_gpu;
         {%- endif %}
         // Iterate over kThreadGroupSize indices
         // TODO: (avbokovoy) Take into account trailing iteration
-        for (auto outer_j = 0; outer_j < kThreadGroupSize && l_start + outer_j < L; outer_j+=kManualUnrollLength) {
+        for (auto outer_j = 0; outer_j < kThreadGroupSize && l_start + outer_j < L - L % kManualUnrollLength; outer_j+=kManualUnrollLength) {
             const auto l_offset = l_start + outer_j;
             {%- if dense or lxu_miss_rate != "cache_conflict_miss_rate::zero" %}
             // Load index from thread j in the group
@@ -373,6 +464,67 @@ using namespace fbgemm_gpu;
         }
         {%- endif %}
 	}
+
+    for(auto j = L - L % kManualUnrollLength; j < kThreadGroupSize && l_start + j < L; ++j)
+    {
+        {%- if dense or lxu_miss_rate != "cache_conflict_miss_rate::zero" %}
+            // Load index from thread j in the group
+            [[maybe_unused]] int64_t idx_j = SHFL_SYNC(idx, j);
+            {%- endif %}
+
+            {%- if is_index_select %}
+            int64_t output_j = L_start + l_start + j;
+            {%- elif nobag %}
+            int64_t output_j = indices_start + l_start + j;
+            {%- endif %}
+
+            {%- if not dense and lxu_miss_rate != "cache_conflict_miss_rate::all" %}
+            // Load cache's index from thread j in the group
+            [[maybe_unused]] {{ locs_or_addrs_type }} {{ locs_or_addrs_idx }}_j
+                = use_lxu_cache ? SHFL_SYNC({{ locs_or_addrs_idx }}, j) : 0;
+            {%- endif %}
+
+            {%- if weighted %}
+            // Load positional weight index from thread j in the group
+            at::acc_type<cache_t, true> idx_weight_j = SHFL_SYNC(idx_weight, j);
+            {%- endif %}
+            {%- if is_gwd_kernel %}
+            const auto global_weight_decay_j = SHFL_SYNC(global_weight_decay, j);
+            {%- endif %}
+
+
+            {#/**************************************************************/#}
+            {#-/*
+                This is the main switch that determines how we are to load and
+                accumulate weights, and is determined by Jinja-time, compile-time,
+                and run-time variables.
+            */#}
+
+            {%- if dense %}
+                {#-/* If it's dense, cache is not supported, so load from the embedding table */#}
+                {{- load_and_accumulate(false) }}
+
+            {%- elif lxu_miss_rate == "cache_conflict_miss_rate::all" %}
+                {#-/* Else if we know we have a 100% miss rate, then always fetch from the embedding table */#}
+                {{- load_and_accumulate(false) }}
+
+            {%- elif lxu_miss_rate == "cache_conflict_miss_rate::zero" %}
+                {#-/* Else if we know we have a 0% miss rate, then always fetch from the cache */#}
+                {{ load_and_accumulate(true) }}
+            {%- else %}
+                {#-/* Else we defer to run-time selection */#}
+                if (placement == PlacementType::MANAGED_CACHING
+                    && {{ locs_or_addrs_idx }}_j != kCacheLocationMissing
+                ) {
+                    {#-/* If the row is available in the cache, fetch from the cache */#}
+                    {{ load_and_accumulate(true) }}
+                } else {
+                    {#-/* Else fetch from the embedding table */#}
+                    {{ load_and_accumulate(false) }}
+                }
+
+            {%- endif %}
+    }
     }
 {%- endmacro %}
 

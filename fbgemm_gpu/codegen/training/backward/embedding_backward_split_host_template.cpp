@@ -187,19 +187,20 @@ enum SSDTensor {
           use_homogeneous_placements,
           {%- endif %}
           {%- if is_gwd %}
-          {%- if "prev_iter_dev" not in args.split_function_arg_names %}
+          {%- if "prev_iter_dev" not in args.split_function_arg_names %},
           prev_iter_dev,
           {%- endif %}
-          {%- if "iter" not in args.split_function_arg_names %}
+          {%- if "iter" not in args.split_function_arg_names %},
           iter,
           {%- endif %}
           gwd_lower_bound,
           {%- endif %} {# /* if is_gwd */ #}
           {%- if not dense %}
-          {{ args.split_function_arg_names | join(", ") }}
+          {{ args.split_function_arg_names | join(", ") }},
           {%- else %}
           /*unused=*/0
           {%- endif %}
+          mixed_D
     );
 
     if (is_annotate_trace_enabled) {
@@ -260,17 +261,18 @@ enum SSDTensor {
         {%- if "prev_iter_dev" not in args.split_function_arg_names %}
         Variable(), // prev_iter_dev
         {%- endif %}
-        {%- if "iter" not in args.split_function_arg_names %}
+        {%- if "iter" not in args.split_function_arg_names %},
         Variable(), // iter
         {%- endif %}
         Variable(), // gwd_lower_bound
         {%- endif %}
         {%- if ssd %}
-        {%- for tensor in ssd_tensors %}
+        {%- for tensor in ssd_tensors %},
         Variable(), // {{ tensor }}
         {%- endfor %}
         {%- endif %}
-        {{ args.split_variables | join(", ") }}
+        {{ args.split_variables | join(", ") }},
+        Variable() // mixed_D
     };
 {%- endmacro %}
 
@@ -519,15 +521,16 @@ Tensor
     const bool use_homogeneous_placements,
     {%- endif %}
     {%- if is_gwd %}
-    {%- if "prev_iter_dev" not in args.split_function_arg_names %}
+    {%- if "prev_iter_dev" not in args.split_function_arg_names %},
     const Tensor& prev_iter_dev,
     {%- endif %}
-    {%- if "iter" not in args.split_function_arg_names %}
+    {%- if "iter" not in args.split_function_arg_names %},
     const int64_t iter,
     {%- endif %}
     const double gwd_lower_bound,
     {%- endif %}
-    {{ args.split_function_args | join(", ") }});
+    {{ args.split_function_args | join(", ") }},
+    const bool mixed_D);
 {%- endfor %} {#-/* for weighted*/#}
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -909,6 +912,8 @@ class {{ autograd_func }} :
     auto {{ var }} = ctx->saved_data["{{ var }}"].{{ ivalue_cast }}();
     {%- endfor %}
     {%- endif %}
+    const auto mixed_D = ctx->saved_data["mixed_D"].toBool();
+
 
     const static bool is_annotate_trace_enabled = config::is_feature_enabled(
         config::FeatureGateName::TBE_ANNOTATE_KINETO_TRACE);

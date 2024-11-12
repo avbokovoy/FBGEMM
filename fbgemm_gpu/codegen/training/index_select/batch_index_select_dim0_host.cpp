@@ -48,7 +48,8 @@ Tensor batch_index_select_dim0_codegen_backward_cuda(
     const Tensor& total_L_offsets,
     const int32_t fixed_L_per_warp,
     const int32_t num_warps_per_feature,
-    const bool permute_output_dim_0_1);
+    const bool permute_output_dim_0_1,
+    const bool mixed_D);
 
 class BatchIndexSelectDim0GPUOp
     : public torch::autograd::Function<BatchIndexSelectDim0GPUOp> {
@@ -282,7 +283,8 @@ class BatchIndexSelectDim0GPUOp
       const Tensor& grad_offsets,
       const Tensor& total_L_offsets,
       const bool permute_output_dim_0_1,
-      const Tensor& saved_tensor) {
+      const Tensor& saved_tensor,
+      const bool mixed_D) {
     if (dev_weights.numel() == 0) {
       return at::empty({0}, dev_weights.options());
     }
@@ -314,7 +316,8 @@ class BatchIndexSelectDim0GPUOp
         total_L_offsets,
         fixed_L_per_warp,
         num_warps_per_feature,
-        permute_output_dim_0_1);
+        permute_output_dim_0_1,
+        mixed_D);
   }
 
   static torch::autograd::variable_list backward(
@@ -335,6 +338,8 @@ class BatchIndexSelectDim0GPUOp
 
     const auto permute_output_dim_0_1 =
         ctx->saved_data["permute_output_dim_0_1"].toBool();
+
+    const auto mixed_D = ctx->saved_data["mixed_D"].toBool();
 
     using torch::autograd::Variable;
 
@@ -362,7 +367,8 @@ class BatchIndexSelectDim0GPUOp
         grad_offsets,
         total_L_offsets,
         permute_output_dim_0_1,
-        saved_tensor);
+        saved_tensor,
+        mixed_D);
 
     return {
         res, // inputs
@@ -602,7 +608,8 @@ class BatchIndexSelectDim0TensorGPUOp
       const Tensor& grad_offsets,
       const Tensor& total_L_offsets,
       const bool permute_output_dim_0_1,
-      const Tensor& saved_tensor) {
+      const Tensor& saved_tensor,
+      const bool mixed_D) {
     if (dev_weights.numel() == 0) {
       return at::empty({0}, dev_weights.options());
     }
@@ -634,7 +641,8 @@ class BatchIndexSelectDim0TensorGPUOp
         total_L_offsets,
         fixed_L_per_warp,
         num_warps_per_feature,
-        permute_output_dim_0_1);
+        permute_output_dim_0_1,
+        mixed_D);
   }
 
   static torch::autograd::variable_list backward(
@@ -655,6 +663,8 @@ class BatchIndexSelectDim0TensorGPUOp
 
     const auto permute_output_dim_0_1 =
         ctx->saved_data["permute_output_dim_0_1"].toBool();
+
+    const auto mixed_D = ctx->saved_data["mixed_D"].toBool();
 
     constexpr int32_t max_segment_length_per_warp = 32;
 
@@ -677,7 +687,8 @@ class BatchIndexSelectDim0TensorGPUOp
         grad_offsets,
         total_L_offsets,
         permute_output_dim_0_1,
-        saved_tensor);
+        saved_tensor,
+        mixed_D);
 
     using torch::autograd::Variable;
     return {

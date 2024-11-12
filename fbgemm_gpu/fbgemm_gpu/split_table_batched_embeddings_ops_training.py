@@ -678,6 +678,11 @@ class SplitTableBatchedEmbeddingBagsCodegen(nn.Module):
                 self.pooling_mode != PoolingMode.NONE
             ), "Mixed dimension tables only supported for pooling tables."
 
+        self.register_buffer(
+            "mixed_D",
+            torch.tensor(mixed_D, device="cpu", dtype=torch.bool),
+        )
+
         assert all(
             cd == compute_devices[0] for cd in compute_devices
         ), "Heterogenous compute_devices are NOT supported!"

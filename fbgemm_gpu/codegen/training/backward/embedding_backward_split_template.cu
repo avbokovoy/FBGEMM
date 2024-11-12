@@ -25,6 +25,7 @@
 #include "fbgemm_gpu/sparse_ops.h"
 #include "fbgemm_gpu/split_embeddings_utils.cuh"
 #include "fbgemm_gpu/utils/ops_utils.h"
+#include <iostream>
 
 using Tensor = at::Tensor;
 using namespace fbgemm_gpu;
@@ -564,7 +565,7 @@ Tensor {{ embedding_cuda_op }}(
     const Tensor& total_L_offsets,
     const int32_t fixed_L_per_warp,
     const int32_t num_warps_per_feature,
-    const bool permute_output_dim_0_1
+    const bool permute_output_dim_0_1,
     {%- elif optimizer != "none" %}
     {%- if is_gwd_kernel %}
     {%- if "prev_iter_dev" not in args.split_function_arg_names %}
@@ -575,14 +576,16 @@ Tensor {{ embedding_cuda_op }}(
     {%- endif %}
     const double gwd_lower_bound,
     {%- endif %}
-    {{ args.split_function_args_no_defaults | join(", ") }}
+    {{ args.split_function_args_no_defaults | join(", ") }},
     {%- else %}
     // This is actually passed via args.split_function_args_no_defaults but explicitly list
     // it here for code readability
     int64_t total_hash_size,
-    c10::SymInt total_unique_indices_
+    c10::SymInt total_unique_indices_,
     {%- endif %}
+    const bool mixed_D
 ) {
+    std::cout << "Mixed D: " << mixed_D << std::endl;
     {%- if not nobag or is_index_select %}
     const int64_t max_D = max_D_.guard_int(__FILE__, __LINE__);
     {%- else %}
@@ -1382,7 +1385,8 @@ TORCH_LIBRARY_FRAGMENT(fbgemm, m) {
           {%- endif %}
           "    float gwd_lower_bound, "
           {%- endif %}
-          "    {{ args.split_function_schemas | join(", ") }}"
+          "    {{ args.split_function_schemas | join(", ") }},"
+          "    bool mixed_D"
           ") -> Tensor");
     DISPATCH_TO_CUDA(
         "{{ embedding_codegen_backward_op }}",
